@@ -1,107 +1,122 @@
 /* -------------------------------------------------------------------------- */
-/* Base Theme Tokens — DEFAULT: Dark Mode (Option 1 - Deep Plum)               */
+/* Base Theme Tokens & System Preferences                                     */
+/* Modern CSS setup: Uses light-dark() with explicit data-theme overrides    */
 /* -------------------------------------------------------------------------- */
+
 :root {
   color-scheme: dark light;
 
-  /* Structure */
-  --sidebar-bg:               #1E1330; /* Deep Plum Neutral */
-  --sidebar-border:           #2E1F4A; /* Low-contrast divider */
-  --sidebar-surface-hover:     #2D1C48; /* Item hover state */
-  --sidebar-surface-active:    #3B225E; /* Active nav item background */
+  /* Theme Palette Palette Definitions */
+  --sidebar-bg-dark:               #1E1330; /* Deep Plum Neutral */
+  --sidebar-border-dark:           #2E1F4A;
+  --sidebar-surface-hover-dark:     #2D1C48;
+  --sidebar-surface-active-dark:    #3B225E;
+  --sidebar-text-primary-dark:     #F3E8FF;
+  --sidebar-text-muted-dark:       #9CA3AF;
+  --sidebar-icon-default-dark:     #A78BFA;
+  --sidebar-icon-active-dark:      #2DD4BF;
+  --sidebar-accent-indicator-dark: #8B5CF6;
+  --sidebar-badge-bg-dark:         #F43F5E;
+  --sidebar-badge-text-dark:       #FFFFFF;
+  --sidebar-cta-bg-dark:           #7C3AED;
+  --sidebar-cta-hover-dark:        #6D28D9;
 
-  /* Text & Icons */
-  --sidebar-text-primary:     #F3E8FF; /* Soft lilac-white */
-  --sidebar-text-muted:       #9CA3AF; /* Unselected nav items */
-  --sidebar-icon-default:     #A78BFA; /* Light purple tint for icons */
-  --sidebar-icon-active:      #2DD4BF; /* Mint/Teal highlight */
+  --sidebar-bg-light:              #FAF8FF; /* Lavender Soft */
+  --sidebar-border-light:          #E9D5FF;
+  --sidebar-surface-hover-light:    #F3E8FF;
+  --sidebar-surface-active-light:   #EDE9FE;
+  --sidebar-text-primary-light:    #0F172A;
+  --sidebar-text-muted-light:      #64748B;
+  --sidebar-icon-default-light:    #7C3AED;
+  --sidebar-icon-active-light:     #06B6D4;
+  --sidebar-accent-indicator-light:#7C3AED;
+  --sidebar-badge-bg-light:        #EF4444;
+  --sidebar-badge-text-light:      #FFFFFF;
+  --sidebar-cta-bg-light:          #7C3AED;
+  --sidebar-cta-hover-light:       #6D28D9;
 
-  /* Interactive Elements */
-  --sidebar-accent-indicator: #8B5CF6; /* Active tab border / glow */
-  --sidebar-badge-bg:         #F43F5E; /* Coral-red notification pill */
-  --sidebar-badge-text:       #FFFFFF;
-  --sidebar-cta-bg:           #7C3AED;
-  --sidebar-cta-hover:        #6D28D9;
+  /* Dynamic CSS light-dark() variable bindings */
+  --sidebar-bg:               light-dark(var(--sidebar-bg-light), var(--sidebar-bg-dark));
+  --sidebar-border:           light-dark(var(--sidebar-border-light), var(--sidebar-border-dark));
+  --sidebar-surface-hover:    light-dark(var(--sidebar-surface-hover-light), var(--sidebar-surface-hover-dark));
+  --sidebar-surface-active:   light-dark(var(--sidebar-surface-active-light), var(--sidebar-surface-active-dark));
+
+  --sidebar-text-primary:     light-dark(var(--sidebar-text-primary-light), var(--sidebar-text-primary-dark));
+  --sidebar-text-muted:       light-dark(var(--sidebar-text-muted-light), var(--sidebar-text-muted-dark));
+  --sidebar-icon-default:     light-dark(var(--sidebar-icon-default-light), var(--sidebar-icon-default-dark));
+  --sidebar-icon-active:      light-dark(var(--sidebar-icon-active-light), var(--sidebar-icon-active-dark));
+
+  --sidebar-accent-indicator: light-dark(var(--sidebar-accent-indicator-light), var(--sidebar-accent-indicator-dark));
+  --sidebar-badge-bg:        light-dark(var(--sidebar-badge-bg-light), var(--sidebar-badge-bg-dark));
+  --sidebar-badge-text:      light-dark(var(--sidebar-badge-text-light), var(--sidebar-badge-text-dark));
+  --sidebar-cta-bg:          light-dark(var(--sidebar-cta-bg-light), var(--sidebar-cta-bg-dark));
+  --sidebar-cta-hover:       light-dark(var(--sidebar-cta-hover-light), var(--sidebar-cta-hover-dark));
 }
 
 /* -------------------------------------------------------------------------- */
-/* OS Level Preference Override (Switch to Light Mode if system is light)    */
+/* Explicit User Theme Overrides ([data-theme="dark" | "light"])             */
 /* -------------------------------------------------------------------------- */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    color-scheme: light;
 
-    /* Option 2 - Lavender Soft (Light Mode Side Panel) */
-    --sidebar-bg:               #FAF8FF;
-    --sidebar-border:           #E9D5FF;
-    --sidebar-surface-hover:     #F3E8FF;
-    --sidebar-surface-active:    #EDE9FE;
-
-    --sidebar-text-primary:     #0F172A;
-    --sidebar-text-muted:       #64748B;
-    --sidebar-icon-default:     #7C3AED;
-    --sidebar-icon-active:      #06B6D4;
-
-    --sidebar-accent-indicator: #7C3AED;
-    --sidebar-badge-bg:         #EF4444;
-    --sidebar-badge-text:       #FFFFFF;
-    --sidebar-cta-bg:           #7C3AED;
-    --sidebar-cta-hover:        #6D28D9;
-  }
-}
-
-/* -------------------------------------------------------------------------- */
-/* Explicit User Theme Overrides (Data Attribute / Class Switch)             */
-/* -------------------------------------------------------------------------- */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --sidebar-bg:               #1E1330;
-  --sidebar-border:           #2E1F4A;
-  --sidebar-surface-hover:     #2D1C48;
-  --sidebar-surface-active:    #3B225E;
+  --sidebar-bg:               var(--sidebar-bg-dark);
+  --sidebar-border:           var(--sidebar-border-dark);
+  --sidebar-surface-hover:    var(--sidebar-surface-hover-dark);
+  --sidebar-surface-active:   var(--sidebar-surface-active-dark);
 
-  --sidebar-text-primary:     #F3E8FF;
-  --sidebar-text-muted:       #9CA3AF;
-  --sidebar-icon-default:     #A78BFA;
-  --sidebar-icon-active:      #2DD4BF;
+  --sidebar-text-primary:     var(--sidebar-text-primary-dark);
+  --sidebar-text-muted:       var(--sidebar-text-muted-dark);
+  --sidebar-icon-default:     var(--sidebar-icon-default-dark);
+  --sidebar-icon-active:      var(--sidebar-icon-active-dark);
 
-  --sidebar-accent-indicator: #8B5CF6;
-  --sidebar-badge-bg:         #F43F5E;
-  --sidebar-badge-text:       #FFFFFF;
-  --sidebar-cta-bg:           #7C3AED;
-  --sidebar-cta-hover:        #6D28D9;
+  --sidebar-accent-indicator: var(--sidebar-accent-indicator-dark);
+  --sidebar-badge-bg:        var(--sidebar-badge-bg-dark);
+  --sidebar-badge-text:      var(--sidebar-badge-text-dark);
+  --sidebar-cta-bg:          var(--sidebar-cta-bg-dark);
+  --sidebar-cta-hover:       var(--sidebar-cta-hover-dark);
 }
 
 [data-theme="light"] {
   color-scheme: light;
 
-  --sidebar-bg:               #FAF8FF;
-  --sidebar-border:           #E9D5FF;
-  --sidebar-surface-hover:     #F3E8FF;
-  --sidebar-surface-active:    #EDE9FE;
+  --sidebar-bg:               var(--sidebar-bg-light);
+  --sidebar-border:           var(--sidebar-border-light);
+  --sidebar-surface-hover:    var(--sidebar-surface-hover-light);
+  --sidebar-surface-active:   var(--sidebar-surface-active-light);
 
-  --sidebar-text-primary:     #0F172A;
-  --sidebar-text-muted:       #64748B;
-  --sidebar-icon-default:     #7C3AED;
-  --sidebar-icon-active:      #06B6D4;
+  --sidebar-text-primary:     var(--sidebar-text-primary-light);
+  --sidebar-text-muted:       var(--sidebar-text-muted-light);
+  --sidebar-icon-default:     var(--sidebar-icon-default-light);
+  --sidebar-icon-active:      var(--sidebar-icon-active-light);
 
-  --sidebar-accent-indicator: #7C3AED;
-  --sidebar-badge-bg:         #EF4444;
-  --sidebar-badge-text:       #FFFFFF;
-  --sidebar-cta-bg:           #7C3AED;
-  --sidebar-cta-hover:        #6D28D9;
+  --sidebar-accent-indicator: var(--sidebar-accent-indicator-light);
+  --sidebar-badge-bg:        var(--sidebar-badge-bg-light);
+  --sidebar-badge-text:      var(--sidebar-badge-text-light);
+  --sidebar-cta-bg:          var(--sidebar-cta-bg-light);
+  --sidebar-cta-hover:       var(--sidebar-cta-hover-light);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Box Sizing & Structural Reset                                              */
+/* -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 /* -------------------------------------------------------------------------- */
 /* Side Panel UI Components                                                   */
 /* -------------------------------------------------------------------------- */
+
 .sidebar {
   background-color: var(--sidebar-bg);
-  border-right: 1px solid var(--sidebar-border);
+  border-inline-end: 1px solid var(--sidebar-border);
   color: var(--sidebar-text-primary);
   width: 260px;
-  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 12px;
@@ -114,26 +129,26 @@
   padding: 8px 12px;
   border-radius: 6px;
   color: var(--sidebar-text-muted);
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
-.nav-item:hover {
-  background-color: var(--sidebar-surface-hover);
-  color: var(--sidebar-text-primary);
-}
+  &:hover {
+    background-color: var(--sidebar-surface-hover);
+    color: var(--sidebar-text-primary);
+  }
 
-.nav-item.active {
-  background-color: var(--sidebar-surface-active);
-  color: var(--sidebar-text-primary);
-  border-left: 3px solid var(--sidebar-accent-indicator);
-}
+  &.active {
+    background-color: var(--sidebar-surface-active);
+    color: var(--sidebar-text-primary);
+    border-inline-start: 3px solid var(--sidebar-accent-indicator);
 
-.nav-item .icon {
-  color: var(--sidebar-icon-default);
-}
+    .icon {
+      color: var(--sidebar-icon-active);
+    }
+  }
 
-.nav-item.active .icon {
-  color: var(--sidebar-icon-active);
+  .icon {
+    color: var(--sidebar-icon-default);
+  }
 }
 
 .badge {
@@ -143,5 +158,5 @@
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 9999px;
-  margin-left: auto;
+  margin-inline-start: auto;
 }
