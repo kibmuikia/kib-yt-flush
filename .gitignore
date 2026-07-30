@@ -5,3 +5,4 @@ docs/
 *.tmp
 *.bak
 node_modules/
+dist/
