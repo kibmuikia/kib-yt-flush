@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kib-YT-Flush",
-  "key": "d169ceb7-67c1-4535-b2af-3586f09abc5e",
+  
   "version": "1.1.0",
   "version_name": "build beta",
   "description": "Locally persist and resume YouTube playback timestamps without watch history.",
