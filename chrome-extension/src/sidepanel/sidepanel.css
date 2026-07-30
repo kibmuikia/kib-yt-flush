@@ -315,3 +315,116 @@ body {
 .clear-btn:hover {
   background-color: var(--sidebar-cta-hover);
 }
+
+/* -------------------------------------------------------------------------- */
+/* KYTF-105: Granular Controls, Delete Actions & Confirmation Modal          */
+/* -------------------------------------------------------------------------- */
+
+.video-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline-start: 4px;
+}
+
+.delete-item-btn {
+  background: transparent;
+  border: none;
+  color: var(--sidebar-text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.delete-item-btn:hover {
+  color: var(--sidebar-badge-bg);
+  background-color: rgba(244, 63, 94, 0.12);
+}
+
+.delete-icon {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
+/* Modal Overlay & Card Styling */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+  transition: opacity 0.15s ease;
+}
+
+.modal-overlay.hidden {
+  display: none;
+}
+
+.modal-box {
+  background-color: var(--sidebar-surface);
+  border: 1px solid var(--sidebar-border);
+  border-radius: 10px;
+  padding: 16px;
+  width: 100%;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+}
+
+.modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--sidebar-text-primary);
+}
+
+.modal-message {
+  font-size: 12px;
+  color: var(--sidebar-text-muted);
+  line-height: 1.4;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.modal-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.secondary-btn {
+  background-color: transparent;
+  border-color: var(--sidebar-border);
+  color: var(--sidebar-text-primary);
+}
+
+.secondary-btn:hover {
+  background-color: var(--sidebar-surface-hover);
+}
+
+.danger-btn {
+  background-color: var(--sidebar-badge-bg);
+  color: #FFFFFF;
+}
+
+.danger-btn:hover {
+  filter: brightness(0.9);
+}
