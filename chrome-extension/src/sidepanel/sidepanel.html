@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kib-YT-Flush</title>
   <link rel="stylesheet" href="sidepanel.css">
-  <script src="sidepanel.js"></script>
 </head>
 <body>
   <div class="panel-container">
@@ -37,7 +36,19 @@
     <footer class="panel-footer">
       <button id="clear-all-btn" class="clear-btn">Clear All History</button>
     </footer>
+
+    <!-- Confirmation Modal Dialog -->
+    <div id="confirm-modal" class="modal-overlay hidden">
+      <div class="modal-box">
+        <h3 class="modal-title">Clear Watch History?</h3>
+        <p class="modal-message">This will remove all saved watch positions and timestamps. This action cannot be undone.</p>
+        <div class="modal-actions">
+          <button id="cancel-modal-btn" class="modal-btn secondary-btn">Cancel</button>
+          <button id="confirm-clear-btn" class="modal-btn danger-btn">Clear All</button>
+        </div>
+      </div>
+    </div>
   </div>
-  
+  <script src="sidepanel.js"></script>
 </body>
 </html>
