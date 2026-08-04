@@ -1,83 +1,92 @@
 /**
- * @file content.js
- * @description YouTube watch progress tracking and auto-resumer content script.
- * KYTF-101: Local chrome.storage.local persistence & LRU cache pruning.
- * KYTF-102: SPA navigation observer, dynamic ad interception, and URL timestamp parser.
+ * @file content.ts
+ * @description YouTube watch progress tracking and auto-resumer content script (TypeScript).
+ * KYTF-204: Content Script Engine TS Refactor (Type-safe storage, DOM queries, & SPA listeners).
  */
 
+import type { ResumeStoreMap } from "../types/storage";
+import { STORAGE_KEY } from "../types/storage";
+
 (function () {
-  'use strict';
+  "use strict";
 
   // --- Configuration & Constants ---
-  const STORAGE_KEY = 'yt_local_resume_store_v1';
-  const SAVE_INTERVAL_MS = 2000;       // Position recording interval (2s)
-  const MIN_SAVE_TIME_SEC = 5;          // Minimum threshold before saving (5s)
-  const COMPLETION_THRESHOLD = 0.95;   // Flush progress once past 95% complete
-  const MAX_STORED_ENTRIES = 200;       // Maximum entries in LRU store
-  const LOG_PREFIX = '[Kib-YT-Flush]';
+  const SAVE_INTERVAL_MS = 2000; // Position recording interval (2s)
+  const MIN_SAVE_TIME_SEC = 5; // Minimum threshold before saving (5s)
+  const COMPLETION_THRESHOLD = 0.95; // Flush progress once past 95% complete
+  const MAX_STORED_ENTRIES = 200; // Maximum entries in LRU store
+  const LOG_PREFIX = "[Kib-YT-Flush]";
 
   // --- Internal State ---
-  let currentVideoId = null;
-  let saveIntervalId = null;
+  let currentVideoId: string | null = null;
+  let saveIntervalId: number | ReturnType<typeof setInterval> | null = null;
   let hasResumedCurrentVideo = false;
   let lastSavedTime = 0;
-  let retryTimeoutId = null;
+  let retryTimeoutId: number | ReturnType<typeof setTimeout> | null = null;
 
   // --- Logging Utilities ---
-  const log = (msg, ...args) => console.log(`${LOG_PREFIX} ${msg}`, ...args);
-  const warn = (msg, ...args) => console.warn(`${LOG_PREFIX} ${msg}`, ...args);
-  const error = (msg, ...args) => console.error(`${LOG_PREFIX} ${msg}`, ...args);
+  const log = (msg: string, ...args: unknown[]): void =>
+    console.log(`${LOG_PREFIX} ${msg}`, ...args);
+  const warn = (msg: string, ...args: unknown[]): void =>
+    console.warn(`${LOG_PREFIX} ${msg}`, ...args);
+  const error = (msg: string, ...args: unknown[]): void =>
+    console.error(`${LOG_PREFIX} ${msg}`, ...args);
 
   // --- Storage API Abstraction (chrome.storage.local) ---
 
   /**
    * Retrieves stored video watch state map.
-   * @returns {Promise<Object>} Object mapping video IDs to watch state metadata.
+   * @returns Object mapping video IDs to watch state metadata.
    */
-  async function loadStore() {
+  async function loadStore(): Promise<ResumeStoreMap> {
     try {
       const result = await chrome.storage.local.get(STORAGE_KEY);
-      return result[STORAGE_KEY] || {};
+      return (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
     } catch (err) {
-      error('Failed to read chrome.storage.local:', err);
+      error("Failed to read chrome.storage.local:", err);
       return {};
     }
   }
 
   /**
    * Saves watch progress map with LRU capacity pruning (max 200 items).
-   * @param {Object} data 
-   * @returns {Promise<boolean>}
+   * @param data ResumeStoreMap containing video watch progress entries.
    */
-  async function saveStore(data) {
+  async function saveStore(data: ResumeStoreMap): Promise<boolean> {
     try {
       const keys = Object.keys(data);
       if (keys.length > MAX_STORED_ENTRIES) {
         // Sort ascending by updatedAt; delete oldest entries
         const sortedKeys = keys.sort(
-          (a, b) => (data[a].updatedAt || 0) - (data[b].updatedAt || 0)
+          (a, b) => (data[a]?.updatedAt || 0) - (data[b]?.updatedAt || 0),
         );
         const overflow = keys.length - MAX_STORED_ENTRIES;
         for (let i = 0; i < overflow; i++) {
-          delete data[sortedKeys[i]];
+          const keyToDelete = sortedKeys[i];
+          if (keyToDelete) {
+            delete data[keyToDelete];
+          }
         }
-        log(`LRU limit reached (${MAX_STORED_ENTRIES}). Evicted ${overflow} oldest entry/entries.`);
+        log(
+          `LRU limit reached (${MAX_STORED_ENTRIES}). Evicted ${overflow} oldest entry/entries.`,
+        );
       }
 
       await chrome.storage.local.set({ [STORAGE_KEY]: data });
       return true;
     } catch (err) {
-      error('Failed writing to chrome.storage.local:', err);
+      error("Failed writing to chrome.storage.local:", err);
       return false;
     }
   }
 
   /**
    * Fetches saved timestamp for a given video ID.
-   * @param {string} videoId 
-   * @returns {Promise<number|null>}
+   * @param videoId Target YouTube video ID.
    */
-  async function getSavedTimestamp(videoId) {
+  async function getSavedTimestamp(
+    videoId: string | null,
+  ): Promise<number | null> {
     if (!videoId) return null;
     const store = await loadStore();
     return store[videoId] ? store[videoId].time : null;
@@ -85,9 +94,9 @@
 
   /**
    * Clears progress record for a video ID from chrome.storage.local.
-   * @param {string} videoId 
+   * @param videoId Target YouTube video ID.
    */
-  async function clearVideoProgress(videoId) {
+  async function clearVideoProgress(videoId: string | null): Promise<void> {
     if (!videoId) return;
     try {
       const store = await loadStore();
@@ -104,7 +113,11 @@
   /**
    * Updates playback position and metadata in local storage.
    */
-  async function updateVideoProgress(videoId, currentTime, duration) {
+  async function updateVideoProgress(
+    videoId: string | null,
+    currentTime: number,
+    duration: number,
+  ): Promise<void> {
     if (!videoId || !currentTime || !duration || isAdPlaying()) return;
 
     const roundedTime = Math.floor(currentTime);
@@ -113,7 +126,10 @@
     if (Math.abs(roundedTime - lastSavedTime) < 1) return;
 
     // Purge entry if watched >= 95% or rewound/started under 5s
-    if (currentTime / duration >= COMPLETION_THRESHOLD || currentTime < MIN_SAVE_TIME_SEC) {
+    if (
+      currentTime / duration >= COMPLETION_THRESHOLD ||
+      currentTime < MIN_SAVE_TIME_SEC
+    ) {
       await clearVideoProgress(videoId);
       return;
     }
@@ -125,8 +141,8 @@
       time: roundedTime,
       duration: Math.floor(duration),
       updatedAt: Date.now(),
-      title: metadata.title || store[videoId]?.title || 'YouTube Video',
-      channelName: metadata.channelName || store[videoId]?.channelName || ''
+      title: metadata.title || store[videoId]?.title || "YouTube Video",
+      channelName: metadata.channelName || store[videoId]?.channelName || "",
     };
 
     await saveStore(store);
@@ -137,27 +153,26 @@
 
   /**
    * Parses video ID from URL search parameters.
-   * @param {string} urlStr 
-   * @returns {string|null}
+   * @param urlStr Full URL string to parse (defaults to current window location).
    */
-  function getVideoId(urlStr = window.location.href) {
+  function getVideoId(urlStr: string = window.location.href): string | null {
     try {
       const url = new URL(urlStr);
-      if (url.pathname === '/watch') {
-        return url.searchParams.get('v');
+      if (url.pathname === "/watch") {
+        return url.searchParams.get("v");
       }
     } catch (err) {
-      error('Error parsing current URL:', err);
+      error("Error parsing current URL:", err);
     }
     return null;
   }
 
   /**
    * Parses time string parameters (e.g., "?t=120", "?t=2m30s", "?t=1h2m3s") into seconds.
-   * @param {string|null} param 
-   * @returns {number|null} Timestamp in seconds or null.
+   * @param param Time parameter string extracted from URL query params.
+   * @returns Timestamp in seconds or null.
    */
-  function parseUrlTimestamp(param) {
+  function parseUrlTimestamp(param: string | null): number | null {
     if (!param) return null;
 
     // Direct numeric input check (e.g. "120" or "120s")
@@ -171,50 +186,52 @@
     const minutesMatch = cleanParam.match(/(\d+)\s*m/i);
     const secondsMatch = cleanParam.match(/(\d+)\s*s/i);
 
-    if (hoursMatch) totalSeconds += parseInt(hoursMatch[1], 10) * 3600;
-    if (minutesMatch) totalSeconds += parseInt(minutesMatch[1], 10) * 60;
-    if (secondsMatch) totalSeconds += parseInt(secondsMatch[1], 10);
+    if (hoursMatch?.[1]) totalSeconds += parseInt(hoursMatch[1], 10) * 3600;
+    if (minutesMatch?.[1]) totalSeconds += parseInt(minutesMatch[1], 10) * 60;
+    if (secondsMatch?.[1]) totalSeconds += parseInt(secondsMatch[1], 10);
 
     return totalSeconds > 0 ? totalSeconds : null;
   }
 
   /**
    * Checks if video player is currently showing an advertisement.
-   * Checks `#movie_player` element for ad indicators.
-   * @returns {boolean}
+   * Checks `#movie_player` element for ad classes and overlay elements.
    */
-  function isAdPlaying() {
-    const playerEl = document.querySelector('#movie_player');
+  function isAdPlaying(): boolean {
+    const playerEl = document.querySelector<HTMLElement>("#movie_player");
     if (!playerEl) return false;
 
     return (
-      playerEl.classList.contains('ad-showing') ||
-      playerEl.classList.contains('ad-interrupting') ||
-      playerEl.classList.contains('ad-created') ||
-      !!document.querySelector('.ytp-ad-player-overlay, .ytp-ad-text')
+      playerEl.classList.contains("ad-showing") ||
+      playerEl.classList.contains("ad-interrupting") ||
+      playerEl.classList.contains("ad-created") ||
+      !!document.querySelector(".ytp-ad-player-overlay, .ytp-ad-text")
     );
   }
 
   /**
    * Extracts video title and channel name metadata from DOM.
-   * @returns {{title: string, channelName: string}}
    */
-  function getVideoMetadata() {
-    let title = '';
-    let channelName = '';
+  function getVideoMetadata(): { title: string; channelName: string } {
+    let title = "";
+    let channelName = "";
 
-    const titleEl = document.querySelector('h1.ytd-watch-metadata yt-formatted-string') ||
-                    document.querySelector('h1.title.ytd-video-primary-info-renderer');
-    if (titleEl && titleEl.textContent.trim()) {
+    const titleEl =
+      document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
+      document.querySelector("h1.title.ytd-video-primary-info-renderer");
+    if (titleEl?.textContent?.trim()) {
       title = titleEl.textContent.trim();
     } else {
-      const metaTitle = document.querySelector('meta[property="og:title"]');
-      if (metaTitle) title = metaTitle.getAttribute('content') || '';
+      const metaTitle = document.querySelector<HTMLMetaElement>(
+        'meta[property="og:title"]',
+      );
+      if (metaTitle) title = metaTitle.getAttribute("content") || "";
     }
 
-    const channelEl = document.querySelector('#owner #channel-name a') ||
-                      document.querySelector('ytd-channel-name #text');
-    if (channelEl && channelEl.textContent.trim()) {
+    const channelEl =
+      document.querySelector("#owner #channel-name a") ||
+      document.querySelector("ytd-channel-name #text");
+    if (channelEl?.textContent?.trim()) {
       channelName = channelEl.textContent.trim();
     }
 
@@ -225,17 +242,24 @@
 
   /**
    * Restores position on main HTML5 video element if no URL timestamp parameter is present.
+   * @param videoEl Target HTML5 video element.
+   * @param videoId Target YouTube video ID.
    */
-  async function applyProgress(videoEl, videoId) {
+  async function applyProgress(
+    videoEl: HTMLVideoElement,
+    videoId: string,
+  ): Promise<void> {
     if (hasResumedCurrentVideo || isAdPlaying()) return;
 
     // Check for explicit deep-link URL timestamp override (?t=... or &t=...)
     const urlParams = new URLSearchParams(window.location.search);
-    const rawTimeParam = urlParams.get('t');
+    const rawTimeParam = urlParams.get("t");
     const explicitTimestamp = parseUrlTimestamp(rawTimeParam);
 
     if (explicitTimestamp !== null) {
-      log(`URL timestamp parameter detected ('t=${rawTimeParam}' => ${explicitTimestamp}s). Skipping auto-resume.`);
+      log(
+        `URL timestamp parameter detected ('t=${rawTimeParam}' => ${explicitTimestamp}s). Skipping auto-resume.`,
+      );
       hasResumedCurrentVideo = true;
       return;
     }
@@ -256,12 +280,12 @@
   /**
    * Disposes of active tracking interval and pending retry timeouts.
    */
-  function cleanup() {
-    if (saveIntervalId) {
+  function cleanup(): void {
+    if (saveIntervalId !== null) {
       clearInterval(saveIntervalId);
       saveIntervalId = null;
     }
-    if (retryTimeoutId) {
+    if (retryTimeoutId !== null) {
       clearTimeout(retryTimeoutId);
       retryTimeoutId = null;
     }
@@ -269,14 +293,20 @@
 
   /**
    * Starts periodic timer to save playback position every 2000ms.
+   * @param videoEl Target HTML5 video element.
+   * @param videoId Target YouTube video ID.
    */
-  function startTracking(videoEl, videoId) {
+  function startTracking(videoEl: HTMLVideoElement, videoId: string): void {
     cleanup();
 
     saveIntervalId = setInterval(async () => {
       // Pause updates while video is paused, ended, or showing an ad
       if (videoEl && !videoEl.paused && !videoEl.ended && !isAdPlaying()) {
-        await updateVideoProgress(videoId, videoEl.currentTime, videoEl.duration);
+        await updateVideoProgress(
+          videoId,
+          videoEl.currentTime,
+          videoEl.duration,
+        );
       }
     }, SAVE_INTERVAL_MS);
 
@@ -286,13 +316,13 @@
   /**
    * Primary initialization runner for watch page navigation.
    */
-  function init() {
+  function init(): void {
     cleanup();
 
     const videoId = getVideoId();
     if (!videoId) {
       currentVideoId = null;
-      log('Not on a valid watch page; tracking idle.');
+      log("Not on a valid watch page; tracking idle.");
       return;
     }
 
@@ -307,17 +337,19 @@
 
     log(`Initializing watch page engine for video ID: ${videoId}`);
 
-    const locateVideoElement = (attemptsLeft = 30) => {
-      const videoEl = document.querySelector('video.html5-main-video');
+    const locateVideoElement = (attemptsLeft = 30): void => {
+      const videoEl = document.querySelector<HTMLVideoElement>(
+        "video.html5-main-video",
+      );
 
       if (videoEl) {
-        const executeSetup = async () => {
+        const executeSetup = async (): Promise<void> => {
           // If ad is currently showing, defer resume until ad completes
           if (isAdPlaying()) {
-            log('Ad detected during setup; deferring auto-resume.');
-            videoEl.addEventListener('timeupdate', function onAdCheck() {
+            log("Ad detected during setup; deferring auto-resume.");
+            videoEl.addEventListener("timeupdate", function onAdCheck() {
               if (!isAdPlaying()) {
-                videoEl.removeEventListener('timeupdate', onAdCheck);
+                videoEl.removeEventListener("timeupdate", onAdCheck);
                 applyProgress(videoEl, videoId);
                 startTracking(videoEl, videoId);
               }
@@ -332,10 +364,15 @@
         if (videoEl.readyState >= 1) {
           executeSetup();
         } else {
-          videoEl.addEventListener('loadedmetadata', executeSetup, { once: true });
+          videoEl.addEventListener("loadedmetadata", executeSetup, {
+            once: true,
+          });
         }
       } else if (attemptsLeft > 0) {
-        retryTimeoutId = setTimeout(() => locateVideoElement(attemptsLeft - 1), 150);
+        retryTimeoutId = setTimeout(
+          () => locateVideoElement(attemptsLeft - 1),
+          150,
+        );
       } else {
         warn(`Could not locate HTML5 video element for video ID: ${videoId}`);
       }
@@ -347,25 +384,27 @@
   // --- SPA Router Event Listeners ---
 
   // Listen to YouTube Polymer SPA navigation events
-  window.addEventListener('yt-navigate-finish', () => {
-    log('YouTube SPA navigation finished (yt-navigate-finish). Re-initializing.');
+  window.addEventListener("yt-navigate-finish", () => {
+    log(
+      "YouTube SPA navigation finished (yt-navigate-finish). Re-initializing.",
+    );
     init();
   });
 
-  window.addEventListener('yt-page-data-updated', () => {
-    log('YouTube page data updated (yt-page-data-updated). Re-checking state.');
+  window.addEventListener("yt-page-data-updated", () => {
+    log("YouTube page data updated (yt-page-data-updated). Re-checking state.");
     init();
   });
 
   // Cleanup timers on unload
-  window.addEventListener('beforeunload', cleanup);
+  window.addEventListener("beforeunload", cleanup);
 
   // Initial Bootstrapping
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
   } else {
     init();
   }
 
-  log('SPA Router observer & Ad Guard layers attached.');
+  log("SPA Router observer & Ad Guard layers attached.");
 })();
