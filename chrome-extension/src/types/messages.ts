@@ -8,13 +8,32 @@ import type { ResumeStoreMap } from "./storage";
 /**
  * Supported message action type discriminators.
  */
-export type MessageType = "GET_STORAGE" | "CLEAR_VIDEO" | "CLEAR_ALL" | "PING";
+export type MessageType =
+  | "GET_STORAGE"
+  | "SAVE_PROGRESS"
+  | "CLEAR_VIDEO"
+  | "CLEAR_ALL"
+  | "PING";
 
 /**
  * Request to retrieve current stored video resume map from chrome.storage.local.
  */
 export interface GetStorageMessage {
   type: "GET_STORAGE";
+}
+
+/**
+ * Request to update or insert a video progress entry in storage via background mutation owner.
+ */
+export interface SaveProgressMessage {
+  type: "SAVE_PROGRESS";
+  payload: {
+    videoId: string;
+    currentTime: number;
+    duration: number;
+    title: string;
+    channelName: string;
+  };
 }
 
 /**
@@ -46,6 +65,7 @@ export interface PingMessage {
  */
 export type ExtensionMessage =
   | GetStorageMessage
+  | SaveProgressMessage
   | ClearVideoMessage
   | ClearAllMessage
   | PingMessage;

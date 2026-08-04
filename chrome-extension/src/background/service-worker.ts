@@ -1,7 +1,7 @@
 /**
  * @file service-worker.ts
  * @description Background service worker for Kib-YT-Flush (Manifest V3).
- * KYTF-203: Service Worker Messaging Bus, Storage Relay & Badge Controller (TypeScript).
+ * KYTF-207: Service Worker Storage Serialized Mutation Owner & Messaging Bus.
  */
 
 import type {
@@ -14,6 +14,20 @@ import type { ResumeStoreMap } from "../types/storage";
 import { STORAGE_KEY } from "../types/storage";
 
 const BADGE_COLOR = "#CC0000"; // YouTube Red
+const MAX_STORED_ENTRIES = 200; // LRU Capacity Limit
+
+// --- Mutation Queue Concurrency Controller ---
+let storageMutationQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Enqueues storage read-modify-write tasks into a sequential Promise chain.
+ * Prevents race conditions and lost updates across concurrent tabs.
+ */
+function enqueueStorageMutation<T>(mutationFn: () => Promise<T>): Promise<T> {
+  const next = storageMutationQueue.then(mutationFn, mutationFn);
+  storageMutationQueue = next.catch(() => {});
+  return next;
+}
 
 // Initialize sidePanel behavior
 if (chrome.sidePanel?.setPanelBehavior) {
@@ -29,7 +43,6 @@ if (chrome.sidePanel?.setPanelBehavior) {
 
 /**
  * Updates the extension badge text and background color based on stored entries count.
- * @param store The stored timestamp mapping object.
  */
 function updateBadge(store?: ResumeStoreMap): void {
   try {
@@ -91,7 +104,7 @@ chrome.storage.onChanged.addListener(
   },
 );
 
-// --- Message Relay Bus ---
+// --- Message Relay Bus & Serialized Storage Mutations ---
 
 chrome.runtime.onMessage.addListener(
   (
@@ -118,14 +131,57 @@ chrome.runtime.onMessage.addListener(
             const response: StorageResponse = { success: true, data };
             sendResponse(response);
           })
-          .catch((err: Error) => {
-            const response: StorageResponse = {
-              success: false,
-              error: err.message,
-            };
-            sendResponse(response);
+          .catch((err: Error) =>
+            sendResponse({ success: false, error: err.message }),
+          );
+        return true;
+      }
+
+      case "SAVE_PROGRESS": {
+        const { videoId, currentTime, duration, title, channelName } =
+          message.payload || {};
+        if (!videoId || currentTime === undefined || duration === undefined) {
+          sendResponse({
+            success: false,
+            error: "Invalid SAVE_PROGRESS payload",
           });
-        return true; // Keep message channel open for async response
+          return false;
+        }
+
+        enqueueStorageMutation(async () => {
+          const result = await chrome.storage.local.get(STORAGE_KEY);
+          const store =
+            (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
+
+          store[videoId] = {
+            time: Math.floor(currentTime),
+            duration: Math.floor(duration),
+            updatedAt: Date.now(),
+            title: title || store[videoId]?.title || "YouTube Video",
+            channelName: channelName || store[videoId]?.channelName || "",
+          };
+
+          // Perform LRU eviction if capacity exceeded
+          const keys = Object.keys(store);
+          if (keys.length > MAX_STORED_ENTRIES) {
+            const sortedKeys = keys.sort(
+              (a, b) => (store[a]?.updatedAt || 0) - (store[b]?.updatedAt || 0),
+            );
+            const overflow = keys.length - MAX_STORED_ENTRIES;
+            for (let i = 0; i < overflow; i++) {
+              const k = sortedKeys[i];
+              if (k) delete store[k];
+            }
+          }
+
+          await chrome.storage.local.set({ [STORAGE_KEY]: store });
+        })
+          .then(() => sendResponse({ success: true }))
+          .catch((err: Error) =>
+            sendResponse({ success: false, error: err.message }),
+          );
+
+        return true;
       }
 
       case "CLEAR_VIDEO": {
@@ -135,31 +191,33 @@ chrome.runtime.onMessage.addListener(
           return false;
         }
 
-        chrome.storage.local
-          .get(STORAGE_KEY)
-          .then(async (result) => {
-            const store =
-              (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
-            if (store[videoId]) {
-              delete store[videoId];
-              await chrome.storage.local.set({ [STORAGE_KEY]: store });
-            }
-            sendResponse({ success: true });
-          })
-          .catch((err: Error) =>
-            sendResponse({ success: false, error: err.message }),
-          );
-        return true; // Keep message channel open for async response
-      }
-
-      case "CLEAR_ALL": {
-        chrome.storage.local
-          .set({ [STORAGE_KEY]: {} })
+        enqueueStorageMutation(async () => {
+          const result = await chrome.storage.local.get(STORAGE_KEY);
+          const store =
+            (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
+          if (store[videoId]) {
+            delete store[videoId];
+            await chrome.storage.local.set({ [STORAGE_KEY]: store });
+          }
+        })
           .then(() => sendResponse({ success: true }))
           .catch((err: Error) =>
             sendResponse({ success: false, error: err.message }),
           );
-        return true; // Keep message channel open for async response
+
+        return true;
+      }
+
+      case "CLEAR_ALL": {
+        enqueueStorageMutation(async () => {
+          await chrome.storage.local.set({ [STORAGE_KEY]: {} });
+        })
+          .then(() => sendResponse({ success: true }))
+          .catch((err: Error) =>
+            sendResponse({ success: false, error: err.message }),
+          );
+
+        return true;
       }
 
       case "PING": {
@@ -184,5 +242,4 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
-// Initial startup badge sync
 refreshBadgeFromStorage();

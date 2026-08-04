@@ -1,10 +1,11 @@
 /**
  * @file content.ts
  * @description YouTube watch progress tracking and auto-resumer content script (TypeScript).
- * KYTF-204: Content Script Engine TS Refactor (Type-safe storage, DOM queries, & SPA listeners).
+ * KYTF-207: Content Script Engine (Routed mutations through Background SW & navigation fix).
  */
 
 import type { ResumeStoreMap } from "../types/storage";
+import type { StorageResponse, ExtensionResponse } from "../types/messages";
 import { STORAGE_KEY } from "../types/storage";
 
 (function () {
@@ -14,7 +15,6 @@ import { STORAGE_KEY } from "../types/storage";
   const SAVE_INTERVAL_MS = 2000; // Position recording interval (2s)
   const MIN_SAVE_TIME_SEC = 5; // Minimum threshold before saving (5s)
   const COMPLETION_THRESHOLD = 0.95; // Flush progress once past 95% complete
-  const MAX_STORED_ENTRIES = 200; // Maximum entries in LRU store
   const LOG_PREFIX = "[Kib-YT-Flush]";
 
   // --- Internal State ---
@@ -32,57 +32,29 @@ import { STORAGE_KEY } from "../types/storage";
   const error = (msg: string, ...args: unknown[]): void =>
     console.error(`${LOG_PREFIX} ${msg}`, ...args);
 
-  // --- Storage API Abstraction (chrome.storage.local) ---
+  // --- Storage & Messaging Interop ---
 
   /**
-   * Retrieves stored video watch state map.
-   * @returns Object mapping video IDs to watch state metadata.
+   * Reads current resume map from background service worker/local storage.
    */
   async function loadStore(): Promise<ResumeStoreMap> {
     try {
-      const result = await chrome.storage.local.get(STORAGE_KEY);
-      return (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
+      const response = (await chrome.runtime.sendMessage({
+        type: "GET_STORAGE",
+      })) as StorageResponse;
+      if (response && response.success && response.data) {
+        return response.data;
+      }
+      const raw = await chrome.storage.local.get(STORAGE_KEY);
+      return (raw[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
     } catch (err) {
-      error("Failed to read chrome.storage.local:", err);
+      error("Failed to read storage state:", err);
       return {};
     }
   }
 
   /**
-   * Saves watch progress map with LRU capacity pruning (max 200 items).
-   * @param data ResumeStoreMap containing video watch progress entries.
-   */
-  async function saveStore(data: ResumeStoreMap): Promise<boolean> {
-    try {
-      const keys = Object.keys(data);
-      if (keys.length > MAX_STORED_ENTRIES) {
-        // Sort ascending by updatedAt; delete oldest entries
-        const sortedKeys = keys.sort(
-          (a, b) => (data[a]?.updatedAt || 0) - (data[b]?.updatedAt || 0),
-        );
-        const overflow = keys.length - MAX_STORED_ENTRIES;
-        for (let i = 0; i < overflow; i++) {
-          const keyToDelete = sortedKeys[i];
-          if (keyToDelete) {
-            delete data[keyToDelete];
-          }
-        }
-        log(
-          `LRU limit reached (${MAX_STORED_ENTRIES}). Evicted ${overflow} oldest entry/entries.`,
-        );
-      }
-
-      await chrome.storage.local.set({ [STORAGE_KEY]: data });
-      return true;
-    } catch (err) {
-      error("Failed writing to chrome.storage.local:", err);
-      return false;
-    }
-  }
-
-  /**
    * Fetches saved timestamp for a given video ID.
-   * @param videoId Target YouTube video ID.
    */
   async function getSavedTimestamp(
     videoId: string | null,
@@ -93,25 +65,23 @@ import { STORAGE_KEY } from "../types/storage";
   }
 
   /**
-   * Clears progress record for a video ID from chrome.storage.local.
-   * @param videoId Target YouTube video ID.
+   * Routes clear progress request through serialized background SW mutation owner.
    */
   async function clearVideoProgress(videoId: string | null): Promise<void> {
     if (!videoId) return;
     try {
-      const store = await loadStore();
-      if (store[videoId]) {
-        delete store[videoId];
-        await saveStore(store);
-        log(`Flushed progress entry for video ID: ${videoId}`);
-      }
+      await chrome.runtime.sendMessage({
+        type: "CLEAR_VIDEO",
+        payload: { videoId },
+      });
+      log(`Dispatched CLEAR_VIDEO request for video ID: ${videoId}`);
     } catch (err) {
-      error(`Error clearing progress for video ID ${videoId}:`, err);
+      error(`Error requesting clear for video ID ${videoId}:`, err);
     }
   }
 
   /**
-   * Updates playback position and metadata in local storage.
+   * Routes update video progress request through serialized background SW mutation owner.
    */
   async function updateVideoProgress(
     videoId: string | null,
@@ -122,10 +92,8 @@ import { STORAGE_KEY } from "../types/storage";
 
     const roundedTime = Math.floor(currentTime);
 
-    // Skip redundant updates if position has not progressed by at least 1s
     if (Math.abs(roundedTime - lastSavedTime) < 1) return;
 
-    // Purge entry if watched >= 95% or rewound/started under 5s
     if (
       currentTime / duration >= COMPLETION_THRESHOLD ||
       currentTime < MIN_SAVE_TIME_SEC
@@ -135,26 +103,29 @@ import { STORAGE_KEY } from "../types/storage";
     }
 
     const metadata = getVideoMetadata();
-    const store = await loadStore();
 
-    store[videoId] = {
-      time: roundedTime,
-      duration: Math.floor(duration),
-      updatedAt: Date.now(),
-      title: metadata.title || store[videoId]?.title || "YouTube Video",
-      channelName: metadata.channelName || store[videoId]?.channelName || "",
-    };
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        type: "SAVE_PROGRESS",
+        payload: {
+          videoId,
+          currentTime: roundedTime,
+          duration,
+          title: metadata.title,
+          channelName: metadata.channelName,
+        },
+      })) as ExtensionResponse;
 
-    await saveStore(store);
-    lastSavedTime = roundedTime;
+      if (response?.success) {
+        lastSavedTime = roundedTime;
+      }
+    } catch (err) {
+      error("Failed to dispatch SAVE_PROGRESS to service worker:", err);
+    }
   }
 
   // --- SPA & Parsing Helper Functions ---
 
-  /**
-   * Parses video ID from URL search parameters.
-   * @param urlStr Full URL string to parse (defaults to current window location).
-   */
   function getVideoId(urlStr: string = window.location.href): string | null {
     try {
       const url = new URL(urlStr);
@@ -167,15 +138,9 @@ import { STORAGE_KEY } from "../types/storage";
     return null;
   }
 
-  /**
-   * Parses time string parameters (e.g., "?t=120", "?t=2m30s", "?t=1h2m3s") into seconds.
-   * @param param Time parameter string extracted from URL query params.
-   * @returns Timestamp in seconds or null.
-   */
   function parseUrlTimestamp(param: string | null): number | null {
     if (!param) return null;
 
-    // Direct numeric input check (e.g. "120" or "120s")
     const cleanParam = param.trim();
     if (/^\d+s?$/i.test(cleanParam)) {
       return parseInt(cleanParam, 10);
@@ -193,10 +158,6 @@ import { STORAGE_KEY } from "../types/storage";
     return totalSeconds > 0 ? totalSeconds : null;
   }
 
-  /**
-   * Checks if video player is currently showing an advertisement.
-   * Checks `#movie_player` element for ad classes and overlay elements.
-   */
   function isAdPlaying(): boolean {
     const playerEl = document.querySelector<HTMLElement>("#movie_player");
     if (!playerEl) return false;
@@ -209,9 +170,6 @@ import { STORAGE_KEY } from "../types/storage";
     );
   }
 
-  /**
-   * Extracts video title and channel name metadata from DOM.
-   */
   function getVideoMetadata(): { title: string; channelName: string } {
     let title = "";
     let channelName = "";
@@ -240,18 +198,12 @@ import { STORAGE_KEY } from "../types/storage";
 
   // --- Navigation & Core Resumer Engine ---
 
-  /**
-   * Restores position on main HTML5 video element if no URL timestamp parameter is present.
-   * @param videoEl Target HTML5 video element.
-   * @param videoId Target YouTube video ID.
-   */
   async function applyProgress(
     videoEl: HTMLVideoElement,
     videoId: string,
   ): Promise<void> {
     if (hasResumedCurrentVideo || isAdPlaying()) return;
 
-    // Check for explicit deep-link URL timestamp override (?t=... or &t=...)
     const urlParams = new URLSearchParams(window.location.search);
     const rawTimeParam = urlParams.get("t");
     const explicitTimestamp = parseUrlTimestamp(rawTimeParam);
@@ -277,9 +229,6 @@ import { STORAGE_KEY } from "../types/storage";
     }
   }
 
-  /**
-   * Disposes of active tracking interval and pending retry timeouts.
-   */
   function cleanup(): void {
     if (saveIntervalId !== null) {
       clearInterval(saveIntervalId);
@@ -291,16 +240,10 @@ import { STORAGE_KEY } from "../types/storage";
     }
   }
 
-  /**
-   * Starts periodic timer to save playback position every 2000ms.
-   * @param videoEl Target HTML5 video element.
-   * @param videoId Target YouTube video ID.
-   */
   function startTracking(videoEl: HTMLVideoElement, videoId: string): void {
     cleanup();
 
     saveIntervalId = setInterval(async () => {
-      // Pause updates while video is paused, ended, or showing an ad
       if (videoEl && !videoEl.paused && !videoEl.ended && !isAdPlaying()) {
         await updateVideoProgress(
           videoId,
@@ -317,19 +260,24 @@ import { STORAGE_KEY } from "../types/storage";
    * Primary initialization runner for watch page navigation.
    */
   function init(): void {
-    cleanup();
-
     const videoId = getVideoId();
     if (!videoId) {
+      cleanup();
       currentVideoId = null;
       log("Not on a valid watch page; tracking idle.");
       return;
     }
 
-    // Guard against duplicate initialization on same video
-    if (videoId === currentVideoId && hasResumedCurrentVideo) {
+    // FIX: Guard against duplicate navigation calls BEFORE calling cleanup()
+    if (
+      videoId === currentVideoId &&
+      hasResumedCurrentVideo &&
+      saveIntervalId !== null
+    ) {
       return;
     }
+
+    cleanup();
 
     currentVideoId = videoId;
     hasResumedCurrentVideo = false;
@@ -344,7 +292,6 @@ import { STORAGE_KEY } from "../types/storage";
 
       if (videoEl) {
         const executeSetup = async (): Promise<void> => {
-          // If ad is currently showing, defer resume until ad completes
           if (isAdPlaying()) {
             log("Ad detected during setup; deferring auto-resume.");
             videoEl.addEventListener("timeupdate", function onAdCheck() {
@@ -383,7 +330,6 @@ import { STORAGE_KEY } from "../types/storage";
 
   // --- SPA Router Event Listeners ---
 
-  // Listen to YouTube Polymer SPA navigation events
   window.addEventListener("yt-navigate-finish", () => {
     log(
       "YouTube SPA navigation finished (yt-navigate-finish). Re-initializing.",
@@ -396,10 +342,8 @@ import { STORAGE_KEY } from "../types/storage";
     init();
   });
 
-  // Cleanup timers on unload
   window.addEventListener("beforeunload", cleanup);
 
-  // Initial Bootstrapping
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {
