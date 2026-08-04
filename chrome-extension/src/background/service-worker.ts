@@ -12,9 +12,11 @@ import type {
 } from "../types/messages";
 import type { ResumeStoreMap } from "../types/storage";
 import { STORAGE_KEY } from "../types/storage";
+import { logger } from "../utils/logger";
 
 const BADGE_COLOR = "#CC0000"; // YouTube Red
 const MAX_STORED_ENTRIES = 200; // LRU Capacity Limit
+const LOG_MODULE = "KFL-BG";
 
 // --- Mutation Queue Concurrency Controller ---
 let storageMutationQueue: Promise<unknown> = Promise.resolve();
@@ -34,10 +36,11 @@ if (chrome.sidePanel?.setPanelBehavior) {
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch((error: unknown) =>
-      console.error(
-        "[Kib-YT-Flush SW] Error setting sidePanel behavior:",
-        error,
-      ),
+      logger.error("Error setting sidePanel behavior", {
+        module: LOG_MODULE,
+        scope: "init",
+        data: error,
+      }),
     );
 }
 
@@ -52,7 +55,11 @@ function updateBadge(store?: ResumeStoreMap): void {
     chrome.action.setBadgeText({ text: badgeText });
     chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
   } catch (err) {
-    console.error("[Kib-YT-Flush SW] Error updating badge:", err);
+    logger.error("Error updating badge", {
+      module: LOG_MODULE,
+      scope: "badge",
+      data: err,
+    });
   }
 }
 
@@ -65,10 +72,11 @@ async function refreshBadgeFromStorage(): Promise<void> {
     const store = (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
     updateBadge(store);
   } catch (err) {
-    console.error(
-      "[Kib-YT-Flush SW] Error reading storage for badge refresh:",
-      err,
-    );
+    logger.error("Error reading storage for badge refresh", {
+      module: LOG_MODULE,
+      scope: "badge",
+      data: err,
+    });
   }
 }
 
@@ -76,16 +84,20 @@ async function refreshBadgeFromStorage(): Promise<void> {
 
 chrome.runtime.onInstalled.addListener(
   (details: chrome.runtime.InstalledDetails) => {
-    console.log(
-      "[Kib-YT-Flush SW] Extension installed/updated:",
-      details.reason,
-    );
+    logger.info("Extension installed/updated", {
+      module: LOG_MODULE,
+      scope: "lifecycle",
+      data: { reason: details.reason },
+    });
     refreshBadgeFromStorage();
   },
 );
 
 chrome.runtime.onStartup.addListener(() => {
-  console.log("[Kib-YT-Flush SW] Service Worker started.");
+  logger.info("Service Worker started", {
+    module: LOG_MODULE,
+    scope: "lifecycle",
+  });
   refreshBadgeFromStorage();
 });
 
@@ -114,12 +126,14 @@ chrome.runtime.onMessage.addListener(
   ): boolean => {
     if (!message || typeof message !== "object") return false;
 
-    console.log(
-      "[Kib-YT-Flush SW] Message received:",
-      message.type,
-      "from:",
-      sender.tab?.id ? `tab ${sender.tab.id}` : "extension context",
-    );
+    logger.debug("Message received", {
+      module: LOG_MODULE,
+      scope: "bus",
+      data: {
+        type: message.type,
+        sender: sender.tab?.id ? `tab ${sender.tab.id}` : "extension context",
+      },
+    });
 
     switch (message.type) {
       case "GET_STORAGE": {
@@ -231,10 +245,11 @@ chrome.runtime.onMessage.addListener(
       }
 
       default: {
-        console.warn(
-          "[Kib-YT-Flush SW] Unhandled message type:",
-          (message as { type: string }).type,
-        );
+        logger.warn("Unhandled message type received", {
+          module: LOG_MODULE,
+          scope: "bus",
+          data: { type: (message as { type: string }).type },
+        });
         sendResponse({ success: false, error: "Unknown message type" });
         return false;
       }

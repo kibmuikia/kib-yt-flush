@@ -7,6 +7,7 @@
 import type { ResumeStoreMap } from "../types/storage";
 import type { StorageResponse, ExtensionResponse } from "../types/messages";
 import { STORAGE_KEY } from "../types/storage";
+import { logger } from "../utils/logger";
 
 (function () {
   "use strict";
@@ -15,7 +16,7 @@ import { STORAGE_KEY } from "../types/storage";
   const SAVE_INTERVAL_MS = 2000; // Position recording interval (2s)
   const MIN_SAVE_TIME_SEC = 5; // Minimum threshold before saving (5s)
   const COMPLETION_THRESHOLD = 0.95; // Flush progress once past 95% complete
-  const LOG_PREFIX = "[Kib-YT-Flush]";
+  const LOG_MODULE = "KFL-ENG";
 
   // --- Internal State ---
   let currentVideoId: string | null = null;
@@ -23,14 +24,6 @@ import { STORAGE_KEY } from "../types/storage";
   let hasResumedCurrentVideo = false;
   let lastSavedTime = 0;
   let retryTimeoutId: number | ReturnType<typeof setTimeout> | null = null;
-
-  // --- Logging Utilities ---
-  const log = (msg: string, ...args: unknown[]): void =>
-    console.log(`${LOG_PREFIX} ${msg}`, ...args);
-  const warn = (msg: string, ...args: unknown[]): void =>
-    console.warn(`${LOG_PREFIX} ${msg}`, ...args);
-  const error = (msg: string, ...args: unknown[]): void =>
-    console.error(`${LOG_PREFIX} ${msg}`, ...args);
 
   // --- Storage & Messaging Interop ---
 
@@ -48,7 +41,11 @@ import { STORAGE_KEY } from "../types/storage";
       const raw = await chrome.storage.local.get(STORAGE_KEY);
       return (raw[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
     } catch (err) {
-      error("Failed to read storage state:", err);
+      logger.error("Failed to read storage state", {
+        module: LOG_MODULE,
+        scope: "storage",
+        data: err,
+      });
       return {};
     }
   }
@@ -74,9 +71,17 @@ import { STORAGE_KEY } from "../types/storage";
         type: "CLEAR_VIDEO",
         payload: { videoId },
       });
-      log(`Dispatched CLEAR_VIDEO request for video ID: ${videoId}`);
+      logger.info("Dispatched CLEAR_VIDEO request", {
+        module: LOG_MODULE,
+        scope: "progress",
+        data: { videoId },
+      });
     } catch (err) {
-      error(`Error requesting clear for video ID ${videoId}:`, err);
+      logger.error("Error requesting clear for video ID", {
+        module: LOG_MODULE,
+        scope: "progress",
+        data: { videoId, error: err },
+      });
     }
   }
 
@@ -120,7 +125,11 @@ import { STORAGE_KEY } from "../types/storage";
         lastSavedTime = roundedTime;
       }
     } catch (err) {
-      error("Failed to dispatch SAVE_PROGRESS to service worker:", err);
+      logger.error("Failed to dispatch SAVE_PROGRESS to service worker", {
+        module: LOG_MODULE,
+        scope: "progress",
+        data: err,
+      });
     }
   }
 
@@ -133,7 +142,11 @@ import { STORAGE_KEY } from "../types/storage";
         return url.searchParams.get("v");
       }
     } catch (err) {
-      error("Error parsing current URL:", err);
+      logger.error("Error parsing current URL", {
+        module: LOG_MODULE,
+        scope: "url-parse",
+        data: err,
+      });
     }
     return null;
   }
@@ -209,9 +222,11 @@ import { STORAGE_KEY } from "../types/storage";
     const explicitTimestamp = parseUrlTimestamp(rawTimeParam);
 
     if (explicitTimestamp !== null) {
-      log(
-        `URL timestamp parameter detected ('t=${rawTimeParam}' => ${explicitTimestamp}s). Skipping auto-resume.`,
-      );
+      logger.info("URL timestamp parameter detected; skipping auto-resume", {
+        module: LOG_MODULE,
+        scope: "resume",
+        data: { rawTimeParam, explicitTimestamp },
+      });
       hasResumedCurrentVideo = true;
       return;
     }
@@ -219,11 +234,19 @@ import { STORAGE_KEY } from "../types/storage";
     try {
       const savedTime = await getSavedTimestamp(videoId);
       if (savedTime && savedTime > MIN_SAVE_TIME_SEC) {
-        log(`Resuming video ${videoId} at ${savedTime}s.`);
+        logger.info(`Resuming video ${videoId} at ${savedTime}s`, {
+          module: LOG_MODULE,
+          scope: "resume",
+          data: { videoId, savedTime },
+        });
         videoEl.currentTime = savedTime;
       }
     } catch (err) {
-      error(`Failed applying saved progress for ${videoId}:`, err);
+      logger.error("Failed applying saved progress", {
+        module: LOG_MODULE,
+        scope: "resume",
+        data: { videoId, error: err },
+      });
     } finally {
       hasResumedCurrentVideo = true;
     }
@@ -253,7 +276,11 @@ import { STORAGE_KEY } from "../types/storage";
       }
     }, SAVE_INTERVAL_MS);
 
-    log(`Started position tracking for video ID: ${videoId}`);
+    logger.info("Started position tracking for video", {
+      module: LOG_MODULE,
+      scope: "tracker",
+      data: { videoId },
+    });
   }
 
   /**
@@ -264,11 +291,14 @@ import { STORAGE_KEY } from "../types/storage";
     if (!videoId) {
       cleanup();
       currentVideoId = null;
-      log("Not on a valid watch page; tracking idle.");
+      logger.debug("Not on a valid watch page; tracking idle", {
+        module: LOG_MODULE,
+        scope: "init",
+      });
       return;
     }
 
-    // FIX: Guard against duplicate navigation calls BEFORE calling cleanup()
+    // Guard against duplicate navigation calls BEFORE calling cleanup()
     if (
       videoId === currentVideoId &&
       hasResumedCurrentVideo &&
@@ -283,7 +313,11 @@ import { STORAGE_KEY } from "../types/storage";
     hasResumedCurrentVideo = false;
     lastSavedTime = 0;
 
-    log(`Initializing watch page engine for video ID: ${videoId}`);
+    logger.info("Initializing watch page engine", {
+      module: LOG_MODULE,
+      scope: "init",
+      data: { videoId },
+    });
 
     const locateVideoElement = (attemptsLeft = 30): void => {
       const videoEl = document.querySelector<HTMLVideoElement>(
@@ -293,7 +327,10 @@ import { STORAGE_KEY } from "../types/storage";
       if (videoEl) {
         const executeSetup = async (): Promise<void> => {
           if (isAdPlaying()) {
-            log("Ad detected during setup; deferring auto-resume.");
+            logger.info("Ad detected during setup; deferring auto-resume", {
+              module: LOG_MODULE,
+              scope: "ad-guard",
+            });
             videoEl.addEventListener("timeupdate", function onAdCheck() {
               if (!isAdPlaying()) {
                 videoEl.removeEventListener("timeupdate", onAdCheck);
@@ -321,7 +358,11 @@ import { STORAGE_KEY } from "../types/storage";
           150,
         );
       } else {
-        warn(`Could not locate HTML5 video element for video ID: ${videoId}`);
+        logger.warn("Could not locate HTML5 video element", {
+          module: LOG_MODULE,
+          scope: "init",
+          data: { videoId },
+        });
       }
     };
 
@@ -331,14 +372,18 @@ import { STORAGE_KEY } from "../types/storage";
   // --- SPA Router Event Listeners ---
 
   window.addEventListener("yt-navigate-finish", () => {
-    log(
-      "YouTube SPA navigation finished (yt-navigate-finish). Re-initializing.",
-    );
+    logger.debug("YouTube SPA navigation finished (yt-navigate-finish)", {
+      module: LOG_MODULE,
+      scope: "router",
+    });
     init();
   });
 
   window.addEventListener("yt-page-data-updated", () => {
-    log("YouTube page data updated (yt-page-data-updated). Re-checking state.");
+    logger.debug("YouTube page data updated (yt-page-data-updated)", {
+      module: LOG_MODULE,
+      scope: "router",
+    });
     init();
   });
 
@@ -350,5 +395,8 @@ import { STORAGE_KEY } from "../types/storage";
     init();
   }
 
-  log("SPA Router observer & Ad Guard layers attached.");
+  logger.debug("SPA Router observer & Ad Guard layers attached", {
+    module: LOG_MODULE,
+    scope: "lifecycle",
+  });
 })();
