@@ -2,10 +2,14 @@
  * @file sidepanel.ts
  * @description Logic for Kib-YT-Flush side panel dashboard (TypeScript).
  * KYTF-207: Side Panel UI (Routed deletions via background SW mutation owner).
+ * Reads chrome.storage.local, binds live data, handles search, single-item deletions, clear-all modal, and seek navigation.
  */
 
 import type { ResumeStoreMap, VideoProgress } from "../types/storage";
 import { STORAGE_KEY } from "../types/storage";
+import { logger } from "../utils/logger";
+
+const LOG_MODULE = "KFL-UI";
 
 // DOM Elements
 const videoListEl = document.getElementById("video-list") as HTMLDivElement;
@@ -73,12 +77,17 @@ async function deleteVideoEntry(videoId: string): Promise<void> {
       type: "CLEAR_VIDEO",
       payload: { videoId },
     });
+    logger.info("Requested video deletion", {
+      module: LOG_MODULE,
+      scope: "delete",
+      data: { videoId },
+    });
   } catch (err) {
-    console.error(
-      "[Kib-YT-Flush SidePanel] Error requesting deletion:",
-      videoId,
-      err,
-    );
+    logger.error("Error requesting deletion", {
+      module: LOG_MODULE,
+      scope: "delete",
+      data: { videoId, error: err },
+    });
   }
 }
 
@@ -186,7 +195,11 @@ async function loadStorageAndRender(): Promise<void> {
       (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
     renderList(currentStoreData, searchInput?.value || "");
   } catch (err) {
-    console.error("[Kib-YT-Flush SidePanel] Error loading storage:", err);
+    logger.error("Error loading storage in sidepanel", {
+      module: LOG_MODULE,
+      scope: "storage",
+      data: err,
+    });
   }
 }
 
@@ -209,8 +222,16 @@ confirmClearBtn?.addEventListener("click", async () => {
   try {
     await chrome.runtime.sendMessage({ type: "CLEAR_ALL" });
     confirmModal?.classList.add("hidden");
+    logger.info("Requested CLEAR_ALL", {
+      module: LOG_MODULE,
+      scope: "clear-all",
+    });
   } catch (err) {
-    console.error("[Kib-YT-Flush SidePanel] Error requesting CLEAR_ALL:", err);
+    logger.error("Error requesting CLEAR_ALL", {
+      module: LOG_MODULE,
+      scope: "clear-all",
+      data: err,
+    });
   }
 });
 
