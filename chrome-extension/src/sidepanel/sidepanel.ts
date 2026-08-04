@@ -1,8 +1,7 @@
 /**
  * @file sidepanel.ts
  * @description Logic for Kib-YT-Flush side panel dashboard (TypeScript).
- * KYTF-205: Side Panel UI & DOM Logic TS Refactor.
- * Reads chrome.storage.local, binds live data, handles search, single-item deletions, clear-all modal, and seek navigation.
+ * KYTF-207: Side Panel UI (Routed deletions via background SW mutation owner).
  */
 
 import type { ResumeStoreMap, VideoProgress } from "../types/storage";
@@ -66,20 +65,17 @@ function formatRelativeTime(timestampMs: number | undefined): string {
 }
 
 /**
- * Deletes a single video entry from chrome.storage.local.
- * @param videoId Target YouTube video ID
+ * Routes deletion request through serialized background SW mutation owner.
  */
 async function deleteVideoEntry(videoId: string): Promise<void> {
   try {
-    const result = await chrome.storage.local.get(STORAGE_KEY);
-    const store = (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
-    if (store[videoId]) {
-      delete store[videoId];
-      await chrome.storage.local.set({ [STORAGE_KEY]: store });
-    }
+    await chrome.runtime.sendMessage({
+      type: "CLEAR_VIDEO",
+      payload: { videoId },
+    });
   } catch (err) {
     console.error(
-      "[Kib-YT-Flush SidePanel] Error deleting entry:",
+      "[Kib-YT-Flush SidePanel] Error requesting deletion:",
       videoId,
       err,
     );
@@ -211,10 +207,10 @@ cancelModalBtn?.addEventListener("click", () => {
 
 confirmClearBtn?.addEventListener("click", async () => {
   try {
-    await chrome.storage.local.set({ [STORAGE_KEY]: {} });
+    await chrome.runtime.sendMessage({ type: "CLEAR_ALL" });
     confirmModal?.classList.add("hidden");
   } catch (err) {
-    console.error("[Kib-YT-Flush SidePanel] Error clearing storage:", err);
+    console.error("[Kib-YT-Flush SidePanel] Error requesting CLEAR_ALL:", err);
   }
 });
 
