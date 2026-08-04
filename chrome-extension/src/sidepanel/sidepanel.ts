@@ -1,40 +1,49 @@
 /**
- * @file sidepanel.js
- * @description Logic for Kib-YT-Flush side panel dashboard.
+ * @file sidepanel.ts
+ * @description Logic for Kib-YT-Flush side panel dashboard (TypeScript).
+ * KYTF-205: Side Panel UI & DOM Logic TS Refactor.
  * Reads chrome.storage.local, binds live data, handles search, single-item deletions, clear-all modal, and seek navigation.
  */
 
-const STORAGE_KEY = 'yt_local_resume_store_v1';
+import type { ResumeStoreMap, VideoProgress } from "../types/storage";
+import { STORAGE_KEY } from "../types/storage";
 
 // DOM Elements
-const videoListEl = document.getElementById('video-list');
-const emptyStateEl = document.getElementById('empty-state');
-const itemCountBadge = document.getElementById('item-count-badge');
-const searchInput = document.getElementById('search-input');
-const clearAllBtn = document.getElementById('clear-all-btn');
+const videoListEl = document.getElementById("video-list") as HTMLDivElement;
+const emptyStateEl = document.getElementById("empty-state") as HTMLDivElement;
+const itemCountBadge = document.getElementById(
+  "item-count-badge",
+) as HTMLSpanElement;
+const searchInput = document.getElementById("search-input") as HTMLInputElement;
+const clearAllBtn = document.getElementById(
+  "clear-all-btn",
+) as HTMLButtonElement;
 
 // Modal DOM Elements
-const confirmModal = document.getElementById('confirm-modal');
-const cancelModalBtn = document.getElementById('cancel-modal-btn');
-const confirmClearBtn = document.getElementById('confirm-clear-btn');
+const confirmModal = document.getElementById("confirm-modal") as HTMLDivElement;
+const cancelModalBtn = document.getElementById(
+  "cancel-modal-btn",
+) as HTMLButtonElement;
+const confirmClearBtn = document.getElementById(
+  "confirm-clear-btn",
+) as HTMLButtonElement;
 
-let currentStoreData = {};
+let currentStoreData: ResumeStoreMap = {};
 
 /**
  * Formats seconds into MM:SS or HH:MM:SS string.
- * @param {number} totalSeconds 
- * @returns {string}
+ * @param totalSeconds Duration in seconds
  */
-function formatDuration(totalSeconds) {
-  if (!totalSeconds || isNaN(totalSeconds)) return '0:00';
+function formatDuration(totalSeconds: number): string {
+  if (!totalSeconds || isNaN(totalSeconds)) return "0:00";
   const sec = Math.floor(totalSeconds);
   const hours = Math.floor(sec / 3600);
   const minutes = Math.floor((sec % 3600) / 60);
   const seconds = sec % 60;
 
-  const paddedSec = seconds.toString().padStart(2, '0');
+  const paddedSec = seconds.toString().padStart(2, "0");
   if (hours > 0) {
-    const paddedMin = minutes.toString().padStart(2, '0');
+    const paddedMin = minutes.toString().padStart(2, "0");
     return `${hours}:${paddedMin}:${paddedSec}`;
   }
   return `${minutes}:${paddedSec}`;
@@ -42,13 +51,12 @@ function formatDuration(totalSeconds) {
 
 /**
  * Returns relative human-readable timestamp string (e.g. "5m ago").
- * @param {number} timestampMs 
- * @returns {string}
+ * @param timestampMs Unix timestamp in milliseconds
  */
-function formatRelativeTime(timestampMs) {
-  if (!timestampMs) return 'Recently';
+function formatRelativeTime(timestampMs: number | undefined): string {
+  if (!timestampMs) return "Recently";
   const diffSec = Math.floor((Date.now() - timestampMs) / 1000);
-  if (diffSec < 60) return 'Just now';
+  if (diffSec < 60) return "Just now";
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
@@ -59,71 +67,82 @@ function formatRelativeTime(timestampMs) {
 
 /**
  * Deletes a single video entry from chrome.storage.local.
- * @param {string} videoId 
+ * @param videoId Target YouTube video ID
  */
-async function deleteVideoEntry(videoId) {
+async function deleteVideoEntry(videoId: string): Promise<void> {
   try {
     const result = await chrome.storage.local.get(STORAGE_KEY);
-    const store = result[STORAGE_KEY] || {};
+    const store = (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
     if (store[videoId]) {
       delete store[videoId];
       await chrome.storage.local.set({ [STORAGE_KEY]: store });
     }
   } catch (err) {
-    console.error('[Kib-YT-Flush SidePanel] Error deleting entry:', videoId, err);
+    console.error(
+      "[Kib-YT-Flush SidePanel] Error deleting entry:",
+      videoId,
+      err,
+    );
   }
 }
 
 /**
  * Navigates active tab to saved timestamp URL.
- * @param {string} videoId 
- * @param {number} timestampSec 
+ * @param videoId Target YouTube video ID
+ * @param timestampSec Playback timestamp in seconds
  */
-function navigateToTimestamp(videoId, timestampSec) {
+function navigateToTimestamp(videoId: string, timestampSec: number): void {
   const targetUrl = `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(timestampSec || 0)}s`;
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (tabs && tabs[0]) {
-      chrome.tabs.update(tabs[0].id, { url: targetUrl });
-    }
-  });
+  chrome.tabs.query(
+    { active: true, currentWindow: true },
+    (tabs: chrome.tabs.Tab[]) => {
+      if (tabs && tabs[0]?.id !== undefined) {
+        chrome.tabs.update(tabs[0].id, { url: targetUrl });
+      }
+    },
+  );
 }
 
 /**
  * Renders stored entries in the side panel list.
- * @param {Object} store Data mapping videoId -> entry object
- * @param {string} filterQuery Optional query to filter titles/IDs
+ * @param store Data mapping videoId -> VideoProgress object
+ * @param filterQuery Optional query to filter titles/IDs
  */
-function renderList(store = {}, filterQuery = '') {
-  videoListEl.innerHTML = '';
-  const entries = Object.entries(store);
+function renderList(store: ResumeStoreMap = {}, filterQuery = ""): void {
+  if (!videoListEl || !emptyStateEl || !itemCountBadge) return;
+
+  videoListEl.innerHTML = "";
+  const entries: [string, VideoProgress][] = Object.entries(store);
   const query = filterQuery.toLowerCase().trim();
 
-  // Sort by updated timestamp descending
-  const filteredEntries = entries.filter(([videoId, data]) => {
-    if (!query) return true;
-    const titleMatch = data.title && data.title.toLowerCase().includes(query);
-    const idMatch = videoId.toLowerCase().includes(query);
-    return titleMatch || idMatch;
-  }).sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0));
+  // Filter and sort by updated timestamp descending
+  const filteredEntries = entries
+    .filter(([videoId, data]) => {
+      if (!query) return true;
+      const titleMatch = data.title && data.title.toLowerCase().includes(query);
+      const idMatch = videoId.toLowerCase().includes(query);
+      return titleMatch || idMatch;
+    })
+    .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
 
   itemCountBadge.textContent = String(filteredEntries.length);
 
   if (filteredEntries.length === 0) {
-    emptyStateEl.classList.remove('hidden');
-    videoListEl.style.display = 'none';
+    emptyStateEl.classList.remove("hidden");
+    videoListEl.style.display = "none";
     return;
   }
 
-  emptyStateEl.classList.add('hidden');
-  videoListEl.style.display = 'flex';
+  emptyStateEl.classList.add("hidden");
+  videoListEl.style.display = "flex";
 
   filteredEntries.forEach(([videoId, data]) => {
-    const card = document.createElement('div');
-    card.className = 'video-card';
+    const card = document.createElement("div");
+    card.className = "video-card";
     card.dataset.videoId = videoId;
 
     const formattedTime = formatDuration(data.time || 0);
-    const relativeTime = formatRelativeTime(data.updated);
+    const relativeTime = formatRelativeTime(data.updatedAt);
     const titleText = data.title || `Video ID: ${videoId}`;
     const thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
@@ -146,14 +165,14 @@ function renderList(store = {}, filterQuery = '') {
     `;
 
     // Single item deletion
-    const deleteBtn = card.querySelector('.delete-item-btn');
-    deleteBtn.addEventListener('click', (e) => {
+    const deleteBtn = card.querySelector<HTMLButtonElement>(".delete-item-btn");
+    deleteBtn?.addEventListener("click", (e: MouseEvent) => {
       e.stopPropagation(); // Stop navigation trigger
       deleteVideoEntry(videoId);
     });
 
     // Click to navigate/jump to video timestamp in active tab
-    card.addEventListener('click', () => {
+    card.addEventListener("click", () => {
       navigateToTimestamp(videoId, data.time || 0);
     });
 
@@ -164,55 +183,63 @@ function renderList(store = {}, filterQuery = '') {
 /**
  * Loads stored data directly from chrome.storage.local and updates view.
  */
-async function loadStorageAndRender() {
+async function loadStorageAndRender(): Promise<void> {
   try {
     const result = await chrome.storage.local.get(STORAGE_KEY);
-    currentStoreData = result[STORAGE_KEY] || {};
-    renderList(currentStoreData, searchInput.value);
+    currentStoreData =
+      (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
+    renderList(currentStoreData, searchInput?.value || "");
   } catch (err) {
-    console.error('[Kib-YT-Flush SidePanel] Error loading storage:', err);
+    console.error("[Kib-YT-Flush SidePanel] Error loading storage:", err);
   }
 }
 
 // Search filter event listener
-searchInput.addEventListener('input', (e) => {
-  renderList(currentStoreData, e.target.value);
+searchInput?.addEventListener("input", (e: Event) => {
+  const target = e.target as HTMLInputElement;
+  renderList(currentStoreData, target.value);
 });
 
 // Confirmation Modal Controls
-clearAllBtn.addEventListener('click', () => {
-  confirmModal.classList.remove('hidden');
+clearAllBtn?.addEventListener("click", () => {
+  confirmModal?.classList.remove("hidden");
 });
 
-cancelModalBtn.addEventListener('click', () => {
-  confirmModal.classList.add('hidden');
+cancelModalBtn?.addEventListener("click", () => {
+  confirmModal?.classList.add("hidden");
 });
 
-confirmClearBtn.addEventListener('click', async () => {
+confirmClearBtn?.addEventListener("click", async () => {
   try {
     await chrome.storage.local.set({ [STORAGE_KEY]: {} });
-    confirmModal.classList.add('hidden');
+    confirmModal?.classList.add("hidden");
   } catch (err) {
-    console.error('[Kib-YT-Flush SidePanel] Error clearing storage:', err);
+    console.error("[Kib-YT-Flush SidePanel] Error clearing storage:", err);
   }
 });
 
 // Close modal on overlay background click
-confirmModal.addEventListener('click', (e) => {
+confirmModal?.addEventListener("click", (e: MouseEvent) => {
   if (e.target === confirmModal) {
-    confirmModal.classList.add('hidden');
+    confirmModal.classList.add("hidden");
   }
 });
 
 // Real-time synchronization via storage change listener
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes[STORAGE_KEY]) {
-    currentStoreData = changes[STORAGE_KEY].newValue || {};
-    renderList(currentStoreData, searchInput.value);
-  }
-});
+chrome.storage.onChanged.addListener(
+  (
+    changes: { [key: string]: chrome.storage.StorageChange },
+    areaName: string,
+  ) => {
+    if (areaName === "local" && changes[STORAGE_KEY]) {
+      currentStoreData =
+        (changes[STORAGE_KEY].newValue as ResumeStoreMap | undefined) || {};
+      renderList(currentStoreData, searchInput?.value || "");
+    }
+  },
+);
 
 // Initialize on DOM ready
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener("DOMContentLoaded", () => {
   loadStorageAndRender();
 });
