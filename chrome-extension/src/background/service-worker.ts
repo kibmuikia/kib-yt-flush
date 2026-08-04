@@ -1,30 +1,38 @@
 /**
- * @file service-worker.js
+ * @file service-worker.ts
  * @description Background service worker for Kib-YT-Flush (Manifest V3).
- * KYTF-103: Service Worker Bus, Storage Relay & Badge Controller.
+ * KYTF-203: Service Worker Messaging Bus, Storage Relay & Badge Controller (TypeScript).
  */
 
-const STORAGE_KEY = "yt_local_resume_store_v1";
+import type {
+  ExtensionMessage,
+  ExtensionResponse,
+  StorageResponse,
+  PingResponse,
+} from "../types/messages";
+import type { ResumeStoreMap } from "../types/storage";
+import { STORAGE_KEY } from "../types/storage";
+
 const BADGE_COLOR = "#CC0000"; // YouTube Red
 
 // Initialize sidePanel behavior
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((error) =>
-    console.error("[Kib-YT-Flush SW] Error setting sidePanel behavior:", error),
-  );
+if (chrome.sidePanel?.setPanelBehavior) {
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch((error: unknown) =>
+      console.error(
+        "[Kib-YT-Flush SW] Error setting sidePanel behavior:",
+        error,
+      ),
+    );
+}
 
 /**
  * Updates the extension badge text and background color based on stored entries count.
- * @param {Object} store The stored timestamp mapping object.
+ * @param store The stored timestamp mapping object.
  */
-function updateBadge(store) {
+function updateBadge(store?: ResumeStoreMap): void {
   try {
-    if (typeof chrome === "undefined" || !chrome.action) {
-      console.warn("[Kib-YT-Flush SW] chrome.action API unavailable");
-      return;
-    }
-
     const entriesCount = store ? Object.keys(store).length : 0;
     const badgeText = entriesCount > 0 ? String(entriesCount) : "";
 
@@ -38,10 +46,10 @@ function updateBadge(store) {
 /**
  * Refreshes badge count directly from chrome.storage.local.
  */
-async function refreshBadgeFromStorage() {
+async function refreshBadgeFromStorage(): Promise<void> {
   try {
     const result = await chrome.storage.local.get(STORAGE_KEY);
-    const store = result[STORAGE_KEY] || {};
+    const store = (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
     updateBadge(store);
   } catch (err) {
     console.error(
@@ -53,10 +61,15 @@ async function refreshBadgeFromStorage() {
 
 // --- Lifecycle Event Listeners ---
 
-chrome.runtime.onInstalled.addListener((details) => {
-  console.log("[Kib-YT-Flush SW] Extension installed/updated:", details.reason);
-  refreshBadgeFromStorage();
-});
+chrome.runtime.onInstalled.addListener(
+  (details: chrome.runtime.InstalledDetails) => {
+    console.log(
+      "[Kib-YT-Flush SW] Extension installed/updated:",
+      details.reason,
+    );
+    refreshBadgeFromStorage();
+  },
+);
 
 chrome.runtime.onStartup.addListener(() => {
   console.log("[Kib-YT-Flush SW] Service Worker started.");
@@ -65,77 +78,111 @@ chrome.runtime.onStartup.addListener(() => {
 
 // --- Storage Change Listener ---
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes[STORAGE_KEY]) {
-    const store = changes[STORAGE_KEY].newValue || {};
-    updateBadge(store);
-  }
-});
+chrome.storage.onChanged.addListener(
+  (
+    changes: { [key: string]: chrome.storage.StorageChange },
+    areaName: string,
+  ) => {
+    if (areaName === "local" && changes[STORAGE_KEY]) {
+      const store =
+        (changes[STORAGE_KEY].newValue as ResumeStoreMap | undefined) || {};
+      updateBadge(store);
+    }
+  },
+);
 
 // --- Message Relay Bus ---
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || typeof message !== "object") return false;
+chrome.runtime.onMessage.addListener(
+  (
+    message: ExtensionMessage,
+    sender: chrome.runtime.MessageSender,
+    sendResponse: (response: ExtensionResponse) => void,
+  ): boolean => {
+    if (!message || typeof message !== "object") return false;
 
-  console.log(
-    "[Kib-YT-Flush SW] Message received:",
-    message.type,
-    "from:",
-    sender.tab ? `tab ${sender.tab.id}` : "extension context",
-  );
+    console.log(
+      "[Kib-YT-Flush SW] Message received:",
+      message.type,
+      "from:",
+      sender.tab?.id ? `tab ${sender.tab.id}` : "extension context",
+    );
 
-  switch (message.type) {
-    case "GET_STORAGE": {
-      chrome.storage.local
-        .get(STORAGE_KEY)
-        .then((result) =>
-          sendResponse({ success: true, data: result[STORAGE_KEY] || {} }),
-        )
-        .catch((err) => sendResponse({ success: false, error: err.message }));
-      return true; // Async response
-    }
+    switch (message.type) {
+      case "GET_STORAGE": {
+        chrome.storage.local
+          .get(STORAGE_KEY)
+          .then((result) => {
+            const data =
+              (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
+            const response: StorageResponse = { success: true, data };
+            sendResponse(response);
+          })
+          .catch((err: Error) => {
+            const response: StorageResponse = {
+              success: false,
+              error: err.message,
+            };
+            sendResponse(response);
+          });
+        return true; // Keep message channel open for async response
+      }
 
-    case "CLEAR_VIDEO": {
-      const { videoId } = message.payload || {};
-      if (!videoId) {
-        sendResponse({ success: false, error: "Missing videoId" });
+      case "CLEAR_VIDEO": {
+        const videoId = message.payload?.videoId;
+        if (!videoId) {
+          sendResponse({ success: false, error: "Missing videoId" });
+          return false;
+        }
+
+        chrome.storage.local
+          .get(STORAGE_KEY)
+          .then(async (result) => {
+            const store =
+              (result[STORAGE_KEY] as ResumeStoreMap | undefined) || {};
+            if (store[videoId]) {
+              delete store[videoId];
+              await chrome.storage.local.set({ [STORAGE_KEY]: store });
+            }
+            sendResponse({ success: true });
+          })
+          .catch((err: Error) =>
+            sendResponse({ success: false, error: err.message }),
+          );
+        return true; // Keep message channel open for async response
+      }
+
+      case "CLEAR_ALL": {
+        chrome.storage.local
+          .set({ [STORAGE_KEY]: {} })
+          .then(() => sendResponse({ success: true }))
+          .catch((err: Error) =>
+            sendResponse({ success: false, error: err.message }),
+          );
+        return true; // Keep message channel open for async response
+      }
+
+      case "PING": {
+        const response: PingResponse = {
+          success: true,
+          status: "PONG",
+          timestamp: Date.now(),
+        };
+        sendResponse(response);
         return false;
       }
 
-      chrome.storage.local
-        .get(STORAGE_KEY)
-        .then(async (result) => {
-          const store = result[STORAGE_KEY] || {};
-          if (store[videoId]) {
-            delete store[videoId];
-            await chrome.storage.local.set({ [STORAGE_KEY]: store });
-          }
-          sendResponse({ success: true });
-        })
-        .catch((err) => sendResponse({ success: false, error: err.message }));
-      return true; // Async response
+      default: {
+        console.warn(
+          "[Kib-YT-Flush SW] Unhandled message type:",
+          (message as { type: string }).type,
+        );
+        sendResponse({ success: false, error: "Unknown message type" });
+        return false;
+      }
     }
-
-    case "CLEAR_ALL": {
-      chrome.storage.local
-        .set({ [STORAGE_KEY]: {} })
-        .then(() => sendResponse({ success: true }))
-        .catch((err) => sendResponse({ success: false, error: err.message }));
-      return true; // Async response
-    }
-
-    case "PING": {
-      sendResponse({ status: "PONG", timestamp: Date.now() });
-      return false;
-    }
-
-    default: {
-      console.warn("[Kib-YT-Flush SW] Unhandled message type:", message.type);
-      sendResponse({ success: false, error: "Unknown message type" });
-      return false;
-    }
-  }
-});
+  },
+);
 
 // Initial startup badge sync
 refreshBadgeFromStorage();
