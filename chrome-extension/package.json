@@ -11,7 +11,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "rimraf dist && vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "pnpm typecheck && rimraf dist && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
