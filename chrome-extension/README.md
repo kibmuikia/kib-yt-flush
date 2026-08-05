@@ -1,4 +1,8 @@
-# Kib-YT-Flush — Chrome Extension (Manifest V3)
+<p align="center">
+  <img src="public/icons/icon128.png" alt="Kib-YT-Flush Logo" width="180" height="180" style="border-radius: 20%;" />
+</p>
+
+<h1 align="center">Kib-YT-Flush — Chrome Extension (Manifest V3)</h1>
 
 Modern, type-safe Manifest V3 Chrome extension for local YouTube watch progress tracking and auto-resuming.
 
